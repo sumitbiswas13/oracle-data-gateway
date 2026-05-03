@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Oracle Data Gateway — Monitor</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:       #080a0e;
+  --surface:  #0d1017;
+  --surface2: #131720;
+  --surface3: #1a2030;
+  --border:   #1e2535;
+  --border2:  #263045;
+  --text:     #c8d4e8;
+  --muted:    #5a6a85;
+  --hint:     #3a4558;
+  --green:    #00d97e;
+  --red:      #ff4d6a;
+  --amber:    #f5a623;
+  --blue:     #3d8eff;
+  --purple:   #9b6dff;
+  --teal:     #00c7c7;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --font-sans: 'IBM Plex Sans', sans-serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:var(--font-sans); min-height:100vh; overflow-x:hidden; }
+
+/* Scanline overlay */
+body::before {
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:1000;
+  background:repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+}
+
+/* Top bar */
+.topbar {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 28px; border-bottom:1px solid var(--border);
+  background:var(--surface); position:sticky; top:0; z-index:100;
+}
+.logo { font-family:var(--font-mono); font-size:13px; font-weight:600; letter-spacing:2px; color:var(--text); }
+.logo span { color:var(--green); }
+.status-row { display:flex; align-items:center; gap:20px; }
+.status-dot { width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 8px var(--green); animation:pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.status-text { font-family:var(--font-mono); font-size:11px; color:var(--muted); letter-spacing:1px; }
+.clock { font-family:var(--font-mono); font-size:11px; color:var(--muted); }
+
+/* Layout */
+.layout { display:grid; grid-template-columns:220px 1fr; min-height:calc(100vh - 49px); }
+
+/* Sidebar */
+.sidebar {
+  background:var(--surface); border-right:1px solid var(--border);
+  padding:20px 0;
+}
+.nav-section { padding:8px 20px 4px; font-family:var(--font-mono); font-size:9px; color:var(--hint); letter-spacing:2px; text-transform:uppercase; }
+.nav-item {
+  display:flex; align-items:center; gap:10px; padding:9px 20px;
+  font-size:12px; color:var(--muted); cursor:pointer; transition:all 0.15s;
+  border-left:2px solid transparent; font-family:var(--font-mono);
+}
+.nav-item:hover { color:var(--text); background:var(--surface2); }
+.nav-item.active { color:var(--green); border-left-color:var(--green); background:rgba(0,217,126,0.05); }
+.nav-dot { width:5px; height:5px; border-radius:50%; background:currentColor; flex-shrink:0; }
+
+/* Main */
+.main { overflow:auto; }
+.page { display:none; padding:28px; }
+.page.active { display:block; }
+
+/* Page header */
+.page-header { margin-bottom:24px; display:flex; justify-content:space-between; align-items:flex-start; }
+.page-header h1 { font-family:var(--font-mono); font-size:16px; font-weight:600; color:var(--text); letter-spacing:1px; }
+.page-header p { font-size:12px; color:var(--muted); margin-top:4px; font-family:var(--font-mono); }
+.refresh-btn {
+  background:var(--surface2); border:1px solid var(--border2); color:var(--muted);
+  font-family:var(--font-mono); font-size:11px; padding:6px 14px; border-radius:4px;
+  cursor:pointer; transition:all 0.15s; letter-spacing:1px;
+}
+.refresh-btn:hover { color:var(--green); border-color:var(--green); }
+
+/* Stats grid */
+.stats-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px; }
+.stat-card {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:6px; padding:18px 20px; position:relative; overflow:hidden;
+}
+.stat-card::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:1px;
+}
+.stat-card.green::before  { background:var(--green); }
+.stat-card.red::before    { background:var(--red); }
+.stat-card.amber::before  { background:var(--amber); }
+.stat-card.blue::before   { background:var(--blue); }
+.stat-card.purple::before { background:var(--purple); }
+.stat-label { font-family:var(--font-mono); font-size:9px; color:var(--muted); letter-spacing:2px; text-transform:uppercase; margin-bottom:10px; }
+.stat-value { font-family:var(--font-mono); font-size:28px; font-weight:600; letter-spacing:-1px; }
+.stat-value.green  { color:var(--green); }
+.stat-value.red    { color:var(--red); }
+.stat-value.amber  { color:var(--amber); }
+.stat-value.blue   { color:var(--blue); }
+.stat-value.purple { color:var(--purple); }
+.stat-sub { font-family:var(--font-mono); font-size:10px; color:var(--muted); margin-top:6px; }
+
+/* Cards */
+.card { background:var(--surface); border:1px solid var(--border); border-radius:6px; margin-bottom:20px; }
+.card-header { padding:14px 18px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+.card-title { font-family:var(--font-mono); font-size:11px; font-weight:600; color:var(--text); letter-spacing:1px; text-transform:uppercase; }
+.card-body { padding:18px; }
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+
+/* Table */
+.data-table { width:100%; border-collapse:collapse; font-size:12px; font-family:var(--font-mono); }
+.data-table th { padding:8px 12px; text-align:left; color:var(--muted); font-size:10px; letter-spacing:1px; text-transform:uppercase; border-bottom:1px solid var(--border); font-weight:500; }
+.data-table td { padding:9px 12px; border-bottom:1px solid var(--border); color:var(--text); }
+.data-table tr:last-child td { border-bottom:none; }
+.data-table tr:hover td { background:var(--surface2); }
+
+/* Badges */
+.badge { display:inline-block; font-size:9px; padding:2px 7px; border-radius:3px; font-family:var(--font-mono); font-weight:600; letter-spacing:1px; }
+.badge-allowed  { background:rgba(0,217,126,0.1);  color:var(--green); }
+.badge-blocked  { background:rgba(255,77,106,0.1);  color:var(--red); }
+.badge-masked   { background:rgba(155,109,255,0.1); color:var(--purple); }
+.badge-flagged  { background:rgba(245,166,35,0.1);  color:var(--amber); }
+.badge-critical { background:rgba(255,77,106,0.15); color:var(--red); border:1px solid rgba(255,77,106,0.3); }
+.badge-high     { background:rgba(245,166,35,0.15); color:var(--amber); }
+.badge-medium   { background:rgba(61,142,255,0.15); color:var(--blue); }
+.badge-low      { background:rgba(90,106,133,0.15); color:var(--muted); }
+
+/* Kafka topic bars */
+.topic-row { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+.topic-name { font-family:var(--font-mono); font-size:11px; color:var(--muted); width:200px; flex-shrink:0; }
+.topic-bar-wrap { flex:1; height:6px; background:var(--surface3); border-radius:3px; overflow:hidden; }
+.topic-bar { height:100%; border-radius:3px; transition:width 0.5s ease; }
+.topic-count { font-family:var(--font-mono); font-size:11px; color:var(--text); width:30px; text-align:right; }
+
+/* Live feed */
+.live-feed { max-height:320px; overflow-y:auto; }
+.feed-item { display:flex; gap:12px; padding:8px 0; border-bottom:1px solid var(--border); font-family:var(--font-mono); font-size:11px; }
+.feed-item:last-child { border-bottom:none; }
+.feed-time { color:var(--hint); flex-shrink:0; width:60px; }
+.feed-user { color:var(--blue); flex-shrink:0; width:100px; overflow:hidden; text-overflow:ellipsis; }
+.feed-table { color:var(--teal); flex-shrink:0; width:130px; }
+.feed-status { flex-shrink:0; }
+.feed-detail { color:var(--muted); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* Masking rules */
+.rule-row { display:flex; gap:12px; padding:8px 12px; border-bottom:1px solid var(--border); font-family:var(--font-mono); font-size:11px; }
+.rule-row:last-child { border-bottom:none; }
+.rule-table { color:var(--teal); width:160px; flex-shrink:0; }
+.rule-field { color:var(--amber); width:130px; flex-shrink:0; }
+.rule-strategy { color:var(--purple); flex:1; }
+.rule-roles { color:var(--muted); }
+
+/* Terminal-style SQL test */
+.terminal { background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:16px; font-family:var(--font-mono); font-size:12px; }
+.term-line { margin-bottom:6px; }
+.term-prompt { color:var(--green); }
+.term-cmd { color:var(--text); }
+.term-output { color:var(--muted); padding-left:16px; }
+.term-blocked { color:var(--red); padding-left:16px; }
+.term-allowed { color:var(--green); padding-left:16px; }
+.term-input { display:flex; gap:8px; margin-top:12px; }
+.term-input input {
+  flex:1; background:transparent; border:none; color:var(--text);
+  font-family:var(--font-mono); font-size:12px; outline:none;
+  border-bottom:1px solid var(--border2);
+}
+.term-input button {
+  background:var(--green); border:none; color:var(--bg); font-family:var(--font-mono);
+  font-size:11px; padding:4px 12px; border-radius:3px; cursor:pointer; font-weight:600;
+}
+
+/* Alert items */
+.alert-item { display:flex; gap:12px; padding:10px 14px; border-bottom:1px solid var(--border); align-items:flex-start; }
+.alert-item:last-child { border-bottom:none; }
+.alert-icon { width:6px; height:6px; border-radius:50%; margin-top:5px; flex-shrink:0; }
+.alert-critical-icon { background:var(--red); box-shadow:0 0 6px var(--red); }
+.alert-high-icon     { background:var(--amber); }
+.alert-medium-icon   { background:var(--blue); }
+.alert-body { flex:1; }
+.alert-msg { font-family:var(--font-mono); font-size:11px; color:var(--text); margin-bottom:3px; }
+.alert-meta { font-family:var(--font-mono); font-size:10px; color:var(--muted); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width:4px; height:4px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--border2); border-radius:2px; }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <div class="logo">ORACLE<span>.</span>GATEWAY <span style="color:var(--muted);font-weight:300">// MONITOR</span></div>
+  <div class="status-row">
+    <div class="status-dot"></div>
+    <div class="status-text">ALL CONTROLS ACTIVE</div>
+    <div class="clock" id="clock">--:--:--</div>
+  </div>
+</div>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="nav-section">Overview</div>
+    <div class="nav-item active" onclick="showPage('dashboard')"><span class="nav-dot"></span>Dashboard</div>
+    <div class="nav-item" onclick="showPage('live')"><span class="nav-dot"></span>Live feed</div>
+
+    <div class="nav-section" style="margin-top:12px">Security</div>
+    <div class="nav-item" onclick="showPage('alerts')"><span class="nav-dot"></span>Alerts <span id="alert-count" style="margin-left:auto;background:rgba(255,77,106,0.15);color:var(--red);font-size:9px;padding:1px 5px;border-radius:3px"></span></div>
+    <div class="nav-item" onclick="showPage('rules')"><span class="nav-dot"></span>Masking rules</div>
+
+    <div class="nav-section" style="margin-top:12px">Streaming</div>
+    <div class="nav-item" onclick="showPage('kafka')"><span class="nav-dot"></span>Kafka topics</div>
+
+    <div class="nav-section" style="margin-top:12px">Tools</div>
+    <div class="nav-item" onclick="showPage('test')"><span class="nav-dot"></span>Gateway tester</div>
+  </aside>
+
+  <!-- Pages -->
+  <main class="main">
+
+    <!-- Dashboard -->
+    <div class="page active" id="page-dashboard">
+      <div class="page-header">
+        <div><h1>// dashboard</h1><p>real-time gateway metrics</p></div>
+        <button class="refresh-btn" onclick="refreshAll()">↻ REFRESH</button>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card green">
+          <div class="stat-label">Total requests</div>
+          <div class="stat-value green" id="stat-total">0</div>
+          <div class="stat-sub">all time</div>
+        </div>
+        <div class="stat-card green">
+          <div class="stat-label">Allowed</div>
+          <div class="stat-value green" id="stat-allowed">0</div>
+          <div class="stat-sub" id="stat-allowed-pct">0% pass rate</div>
+        </div>
+        <div class="stat-card red">
+          <div class="stat-label">Blocked</div>
+          <div class="stat-value red" id="stat-blocked">0</div>
+          <div class="stat-sub" id="stat-blocked-pct">0% block rate</div>
+        </div>
+        <div class="stat-card purple">
+          <div class="stat-label">Masked</div>
+          <div class="stat-value purple" id="stat-masked">0</div>
+          <div class="stat-sub">PII fields redacted</div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div>
+          <div class="stats-grid" style="grid-template-columns:1fr 1fr;margin-bottom:20px">
+            <div class="stat-card amber">
+              <div class="stat-label">Anomalies</div>
+              <div class="stat-value amber" id="stat-anomalies">0</div>
+              <div class="stat-sub">detected</div>
+            </div>
+            <div class="stat-card blue">
+              <div class="stat-label">Avg latency</div>
+              <div class="stat-value blue" id="stat-latency">0</div>
+              <div class="stat-sub">ms per request</div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">Kafka events</span></div>
+            <div class="card-body" id="kafka-mini"></div>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:0">
+          <div class="card-header"><span class="card-title">Recent activity</span></div>
+          <div class="live-feed card-body" id="dash-feed" style="padding:8px 12px"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live feed -->
+    <div class="page" id="page-live">
+      <div class="page-header">
+        <div><h1>// live feed</h1><p>every gateway transaction in real time</p></div>
+        <button class="refresh-btn" onclick="refreshAll()">↻ REFRESH</button>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Request log</span></div>
+        <div style="padding:0">
+          <table class="data-table">
+            <thead><tr><th>Time</th><th>User</th><th>Table</th><th>Method</th><th>Rows</th><th>Status</th><th>Detail</th></tr></thead>
+            <tbody id="audit-table"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Alerts -->
+    <div class="page" id="page-alerts">
+      <div class="page-header">
+        <div><h1>// alerts</h1><p>anomalies and blocked requests</p></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Active alerts</span></div>
+        <div id="alerts-body"></div>
+      </div>
+    </div>
+
+    <!-- Masking rules -->
+    <div class="page" id="page-rules">
+      <div class="page-header">
+        <div><h1>// masking rules</h1><p>field-level egress controls</p></div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Active rules</span>
+          <span id="rules-count" style="font-family:var(--font-mono);font-size:11px;color:var(--muted)"></span>
+        </div>
+        <div id="rules-body"></div>
+      </div>
+    </div>
+
+    <!-- Kafka topics -->
+    <div class="page" id="page-kafka">
+      <div class="page-header">
+        <div><h1>// kafka topics</h1><p>event stream message counts</p></div>
+        <button class="refresh-btn" onclick="refreshAll()">↻ REFRESH</button>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Topic message counts</span></div>
+        <div class="card-body" id="kafka-topics"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Recent blocked requests — gateway.events.blocked</span></div>
+        <div style="padding:0">
+          <table class="data-table">
+            <thead><tr><th>User</th><th>Endpoint</th><th>Reason</th><th>Time</th></tr></thead>
+            <tbody id="blocked-table"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gateway tester -->
+    <div class="page" id="page-test">
+      <div class="page-header">
+        <div><h1>// gateway tester</h1><p>test ingress and egress controls live</p></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header"><span class="card-title">Send request</span></div>
+          <div class="card-body">
+            <div style="margin-bottom:12px">
+              <label style="font-family:var(--font-mono);font-size:10px;color:var(--muted);display:block;margin-bottom:6px;letter-spacing:1px">TOKEN</label>
+              <select id="test-token" style="width:100%;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:7px 10px;border-radius:4px;outline:none">
+                <option value="tok_admin_001">tok_admin_001 — ADMIN</option>
+                <option value="tok_manager_001">tok_manager_001 — MANAGER</option>
+                <option value="tok_analyst_001">tok_analyst_001 — ANALYST</option>
+                <option value="tok_readonly_001">tok_readonly_001 — READONLY</option>
+                <option value="tok_hacker_999">tok_hacker_999 — INVALID</option>
+              </select>
+            </div>
+            <div style="margin-bottom:12px">
+              <label style="font-family:var(--font-mono);font-size:10px;color:var(--muted);display:block;margin-bottom:6px;letter-spacing:1px">TABLE</label>
+              <select id="test-table" style="width:100%;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:7px 10px;border-radius:4px;outline:none">
+                <option value="GPS_EMPLOYEES">GPS_EMPLOYEES</option>
+                <option value="GPS_PAYSLIPS">GPS_PAYSLIPS</option>
+                <option value="GPS_TAX_RULES">GPS_TAX_RULES</option>
+                <option value="GPS_PAYROLL_RUNS">GPS_PAYROLL_RUNS</option>
+                <option value="SYS_PASSWORDS">SYS_PASSWORDS (blocked)</option>
+              </select>
+            </div>
+            <div style="margin-bottom:16px">
+              <label style="font-family:var(--font-mono);font-size:10px;color:var(--muted);display:block;margin-bottom:6px;letter-spacing:1px">FILTER (optional — try injection)</label>
+              <input id="test-filter" type="text" placeholder="e.g. EMPLOYEE_ID = 1 or 1 UNION SELECT *..."
+                style="width:100%;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:7px 10px;border-radius:4px;outline:none">
+            </div>
+            <button onclick="runTest()" style="background:var(--green);border:none;color:var(--bg);font-family:var(--font-mono);font-size:11px;font-weight:600;padding:9px 20px;border-radius:4px;cursor:pointer;letter-spacing:1px;width:100%">▶ EXECUTE</button>
+
+            <div style="margin-top:16px">
+              <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-bottom:8px;letter-spacing:1px">QUICK TESTS</div>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <button onclick="quickTest('sql')" style="background:var(--surface2);border:1px solid var(--border2);color:var(--red);font-family:var(--font-mono);font-size:10px;padding:6px 10px;border-radius:3px;cursor:pointer;text-align:left">🛡 SQL injection attack</button>
+                <button onclick="quickTest('noauth')" style="background:var(--surface2);border:1px solid var(--border2);color:var(--red);font-family:var(--font-mono);font-size:10px;padding:6px 10px;border-radius:3px;cursor:pointer;text-align:left">🛡 Invalid token</button>
+                <button onclick="quickTest('blocked_table')" style="background:var(--surface2);border:1px solid var(--border2);color:var(--red);font-family:var(--font-mono);font-size:10px;padding:6px 10px;border-radius:3px;cursor:pointer;text-align:left">🛡 Blocked table</button>
+                <button onclick="quickTest('admin_clean')" style="background:var(--surface2);border:1px solid var(--border2);color:var(--green);font-family:var(--font-mono);font-size:10px;padding:6px 10px;border-radius:3px;cursor:pointer;text-align:left">✓ Clean admin request</button>
+                <button onclick="quickTest('readonly_masked')" style="background:var(--surface2);border:1px solid var(--border2);color:var(--purple);font-family:var(--font-mono);font-size:10px;padding:6px 10px;border-radius:3px;cursor:pointer;text-align:left">◉ Readonly (masked)</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span class="card-title">Response</span></div>
+          <div class="card-body">
+            <div id="test-output" style="font-family:var(--font-mono);font-size:11px;min-height:200px">
+              <span style="color:var(--muted)">// waiting for request...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// ── Mock gateway state ────────────────────────────────────────
+const MOCK_USERS = {
+  'tok_admin_001':   {role:'ADMIN',    name:'admin'},
+  'tok_manager_001': {role:'MANAGER',  name:'manager'},
+  'tok_analyst_001': {role:'ANALYST',  name:'analyst'},
+  'tok_readonly_001':{role:'READONLY', name:'readonly'},
+};
+
+const SENSITIVE_FIELDS = {
+  GPS_EMPLOYEES:    ['EMAIL','BASE_SALARY','HOURLY_RATE'],
+  GPS_PAYSLIPS:     ['GROSS_PAY','NET_PAY','TOTAL_TAX'],
+  GPS_PAYROLL_RUNS: ['TOTAL_GROSS','TOTAL_NET'],
+};
+
+const ALLOWED_TABLES = ['GPS_EMPLOYEES','GPS_PAYSLIPS','GPS_TAX_RULES','GPS_PAYROLL_RUNS'];
+
+const SQL_PATTERNS = ['UNION SELECT','DROP TABLE','--','SLEEP(','WAITFOR','EXEC(','xp_cmdshell','OR 1=1','INFORMATION_SCHEMA'];
+
+const MASKED_ROLES = {
+  GPS_EMPLOYEES:    {EMAIL:['ADMIN'], BASE_SALARY:['ADMIN','MANAGER'], HOURLY_RATE:['ADMIN','MANAGER']},
+  GPS_PAYSLIPS:     {GROSS_PAY:['ADMIN','MANAGER'], NET_PAY:['ADMIN','MANAGER'], TOTAL_TAX:['ADMIN','MANAGER']},
+  GPS_PAYROLL_RUNS: {TOTAL_GROSS:['ADMIN'], TOTAL_NET:['ADMIN']},
+};
+
+// State
+let auditLog = [];
+let alerts   = [];
+let kafkaCounts = {'gateway.events.all':0,'gateway.events.blocked':0,'gateway.events.anomalies':0,'gateway.events.data_access':0,'gateway.audit.trail':0};
+let stats    = {total:0, allowed:0, blocked:0, masked:0, anomalies:0, total_ms:0};
+let blockedLog = [];
+
+const MASKING_RULES = [
+  {table:'GPS_EMPLOYEES',    field:'EMAIL',       strategy:'FAKE_EMAIL',   allowed:['ADMIN']},
+  {table:'GPS_EMPLOYEES',    field:'BASE_SALARY',  strategy:'SALARY_RANGE', allowed:['ADMIN','MANAGER']},
+  {table:'GPS_EMPLOYEES',    field:'HOURLY_RATE',  strategy:'SALARY_RANGE', allowed:['ADMIN','MANAGER']},
+  {table:'GPS_PAYSLIPS',     field:'GROSS_PAY',    strategy:'REDACT',       allowed:['ADMIN','MANAGER']},
+  {table:'GPS_PAYSLIPS',     field:'NET_PAY',      strategy:'REDACT',       allowed:['ADMIN','MANAGER']},
+  {table:'GPS_PAYSLIPS',     field:'TOTAL_TAX',    strategy:'REDACT',       allowed:['ADMIN','MANAGER']},
+  {table:'GPS_PAYROLL_RUNS', field:'TOTAL_GROSS',  strategy:'REDACT',       allowed:['ADMIN']},
+  {table:'GPS_PAYROLL_RUNS', field:'TOTAL_NET',    strategy:'REDACT',       allowed:['ADMIN']},
+];
+
+// Simulate some initial traffic
+function seedTraffic() {
+  const reqs = [
+    {token:'tok_admin_001',   table:'GPS_EMPLOYEES',    ok:true,  rows:10, masked:0},
+    {token:'tok_admin_001',   table:'GPS_PAYSLIPS',      ok:true,  rows:5,  masked:0},
+    {token:'tok_analyst_001', table:'GPS_EMPLOYEES',    ok:true,  rows:3,  masked:3},
+    {token:'tok_readonly_001',table:'GPS_EMPLOYEES',    ok:true,  rows:3,  masked:3},
+    {token:'tok_hacker_999',  table:'GPS_EMPLOYEES',    ok:false, reason:'Invalid token'},
+    {token:'tok_readonly_001',table:'GPS_EMPLOYEES',    ok:false, reason:'SQL injection: UNION SELECT injection', filter:'1 UNION SELECT *'},
+    {token:'tok_admin_001',   table:'GPS_TAX_RULES',    ok:true,  rows:5,  masked:0},
+    {token:'tok_manager_001', table:'GPS_PAYROLL_RUNS', ok:true,  rows:4,  masked:2},
+  ];
+
+  reqs.forEach((r, i) => {
+    const user = MOCK_USERS[r.token] || {role:'UNKNOWN', name:'unknown'};
+    const time = new Date(Date.now() - (reqs.length - i) * 8000);
+    const ms   = Math.random() * 3 + 0.5;
+
+    const entry = {
+      time:    time.toTimeString().slice(0,8),
+      user:    r.token,
+      role:    user.role,
+      table:   r.table,
+      method:  'SELECT',
+      rows:    r.ok ? r.rows : 0,
+      masked:  r.ok ? r.masked : 0,
+      status:  r.ok ? (r.masked > 0 ? 'MASKED' : 'ALLOWED') : 'BLOCKED',
+      reason:  r.reason || '',
+      ms:      ms.toFixed(2),
+    };
+
+    auditLog.push(entry);
+    kafkaCounts['gateway.audit.trail']++;
+    kafkaCounts['gateway.events.all']++;
+    stats.total++;
+    stats.total_ms += ms;
+
+    if (r.ok) {
+      stats.allowed++;
+      stats.masked += r.masked;
+      kafkaCounts['gateway.events.data_access']++;
+    } else {
+      stats.blocked++;
+      kafkaCounts['gateway.events.blocked']++;
+      blockedLog.push({user:r.token, endpoint:`/data/${r.table}`, reason:r.reason, time:entry.time});
+      alerts.push({severity:'HIGH', type:'BLOCKED_REQUEST', msg:r.reason || 'Request blocked', user:r.token, time:entry.time});
+    }
+  });
+  updateAlertCount();
+}
+
+// ── Gateway simulation ────────────────────────────────────────
+function simulateRequest(token, table, filter='') {
+  const user  = MOCK_USERS[token];
+  const t0    = performance.now();
+  const time  = new Date().toTimeString().slice(0,8);
+  let status  = 'ALLOWED';
+  let reason  = '';
+  let rows    = 0;
+  let maskedF = [];
+
+  // Auth check
+  if (!user) {
+    status = 'BLOCKED'; reason = 'Invalid or expired token';
+  }
+  // SQL injection
+  else if (filter && SQL_PATTERNS.some(p => filter.toUpperCase().includes(p))) {
+    status = 'BLOCKED'; reason = `SQL injection detected: ${SQL_PATTERNS.find(p => filter.toUpperCase().includes(p))}`;
+  }
+  // Table whitelist
+  else if (!ALLOWED_TABLES.includes(table)) {
+    status = 'BLOCKED'; reason = `Table '${table}' not accessible through gateway`;
+  }
+  else {
+    rows = Math.floor(Math.random() * 8) + 2;
+    // Masking
+    const tableRules = MASKED_ROLES[table] || {};
+    for (const [field, allowedRoles] of Object.entries(tableRules)) {
+      if (!allowedRoles.includes(user.role)) maskedF.push(field);
+    }
+    if (maskedF.length > 0) status = 'MASKED';
+  }
+
+  const ms = (performance.now() - t0 + Math.random() * 2 + 0.3).toFixed(2);
+
+  const entry = {
+    time, user:token, role:user?.role||'UNKNOWN', table,
+    method:'SELECT', rows, masked:maskedF.length,
+    status, reason, filter, maskedFields:maskedF, ms,
+  };
+
+  auditLog.unshift(entry);
+  kafkaCounts['gateway.audit.trail']++;
+  kafkaCounts['gateway.events.all']++;
+  stats.total++;
+  stats.total_ms += parseFloat(ms);
+
+  if (status === 'BLOCKED') {
+    stats.blocked++;
+    kafkaCounts['gateway.events.blocked']++;
+    blockedLog.unshift({user:token, endpoint:`/data/${table}`, reason, time});
+    alerts.unshift({severity:'HIGH', type:'BLOCKED_REQUEST', msg:reason, user:token, time});
+    updateAlertCount();
+  } else {
+    stats.allowed++;
+    stats.masked += maskedF.length;
+    kafkaCounts['gateway.events.data_access']++;
+  }
+
+  return entry;
+}
+
+// ── Render functions ──────────────────────────────────────────
+function updateAlertCount() {
+  const el = document.getElementById('alert-count');
+  if (el) el.textContent = alerts.length > 0 ? alerts.length : '';
+}
+
+function renderStats() {
+  const total = stats.total || 1;
+  document.getElementById('stat-total').textContent   = stats.total;
+  document.getElementById('stat-allowed').textContent = stats.allowed;
+  document.getElementById('stat-blocked').textContent = stats.blocked;
+  document.getElementById('stat-masked').textContent  = stats.masked;
+  document.getElementById('stat-anomalies').textContent = alerts.filter(a=>a.type!=='BLOCKED_REQUEST').length;
+  document.getElementById('stat-latency').textContent = (stats.total_ms / total).toFixed(1);
+  document.getElementById('stat-allowed-pct').textContent = `${((stats.allowed/total)*100).toFixed(0)}% pass rate`;
+  document.getElementById('stat-blocked-pct').textContent = `${((stats.blocked/total)*100).toFixed(0)}% block rate`;
+}
+
+function renderKafkaMini() {
+  const el = document.getElementById('kafka-mini');
+  if (!el) return;
+  const max = Math.max(...Object.values(kafkaCounts), 1);
+  const colors = {'gateway.events.all':'var(--blue)','gateway.events.blocked':'var(--red)','gateway.events.anomalies':'var(--amber)','gateway.events.data_access':'var(--green)','gateway.audit.trail':'var(--purple)'};
+  el.innerHTML = Object.entries(kafkaCounts).map(([t,c]) => `
+    <div class="topic-row">
+      <div class="topic-name">${t.replace('gateway.','')}</div>
+      <div class="topic-bar-wrap"><div class="topic-bar" style="width:${Math.max((c/max)*100,2)}%;background:${colors[t]||'var(--muted)'}"></div></div>
+      <div class="topic-count">${c}</div>
+    </div>`).join('');
+}
+
+function renderFeed(containerId, limit=8) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = auditLog.slice(0,limit).map(e => `
+    <div class="feed-item">
+      <span class="feed-time">${e.time}</span>
+      <span class="feed-user">${(MOCK_USERS[e.user]?.name||'???')}</span>
+      <span class="feed-table">${e.table}</span>
+      <span class="feed-status"><span class="badge badge-${e.status.toLowerCase()}">${e.status}</span></span>
+      <span class="feed-detail">${e.reason || (e.masked > 0 ? `${e.masked} fields masked` : `${e.rows} rows`)}</span>
+    </div>`).join('');
+}
+
+function renderAuditTable() {
+  const el = document.getElementById('audit-table');
+  if (!el) return;
+  el.innerHTML = auditLog.slice(0,30).map(e => `
+    <tr>
+      <td>${e.time}</td>
+      <td style="color:var(--blue)">${MOCK_USERS[e.user]?.name||'???'}</td>
+      <td style="color:var(--teal)">${e.table}</td>
+      <td>${e.method}</td>
+      <td>${e.rows}</td>
+      <td><span class="badge badge-${e.status.toLowerCase()}">${e.status}</span></td>
+      <td style="color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.reason || (e.maskedFields?.join(', ') || `${e.ms}ms`)}</td>
+    </tr>`).join('');
+}
+
+function renderAlerts() {
+  const el = document.getElementById('alerts-body');
+  if (!el) return;
+  if (!alerts.length) { el.innerHTML = '<div style="padding:20px;font-family:var(--font-mono);font-size:12px;color:var(--muted)">// no alerts</div>'; return; }
+  el.innerHTML = alerts.map(a => `
+    <div class="alert-item">
+      <div class="alert-icon alert-${a.severity.toLowerCase()}-icon"></div>
+      <div class="alert-body">
+        <div class="alert-msg">${a.msg}</div>
+        <div class="alert-meta">user: ${a.user} · ${a.time} · <span class="badge badge-${a.severity.toLowerCase()}">${a.severity}</span></div>
+      </div>
+    </div>`).join('');
+}
+
+function renderRules() {
+  const el = document.getElementById('rules-body');
+  const cnt = document.getElementById('rules-count');
+  if (!el) return;
+  if (cnt) cnt.textContent = `${MASKING_RULES.length} active rules`;
+  el.innerHTML = MASKING_RULES.map(r => `
+    <div class="rule-row">
+      <span class="rule-table">${r.table}</span>
+      <span class="rule-field">${r.field}</span>
+      <span class="rule-strategy">${r.strategy}</span>
+      <span class="rule-roles">${r.allowed.join(', ')}</span>
+    </div>`).join('');
+}
+
+function renderKafkaTopics() {
+  const el = document.getElementById('kafka-topics');
+  if (!el) return;
+  const max = Math.max(...Object.values(kafkaCounts), 1);
+  const colors = {'gateway.events.all':'var(--blue)','gateway.events.blocked':'var(--red)','gateway.events.anomalies':'var(--amber)','gateway.events.data_access':'var(--green)','gateway.audit.trail':'var(--purple)'};
+  el.innerHTML = Object.entries(kafkaCounts).map(([t,c]) => `
+    <div class="topic-row" style="margin-bottom:14px">
+      <div class="topic-name" style="width:280px;font-size:12px">${t}</div>
+      <div class="topic-bar-wrap"><div class="topic-bar" style="width:${Math.max((c/max)*100,2)}%;background:${colors[t]||'var(--muted)'}"></div></div>
+      <div class="topic-count" style="width:40px">${c}</div>
+    </div>`).join('');
+
+  const bt = document.getElementById('blocked-table');
+  if (bt) bt.innerHTML = blockedLog.slice(0,10).map(b => `
+    <tr>
+      <td style="color:var(--red)">${MOCK_USERS[b.user]?.name||b.user}</td>
+      <td>${b.endpoint}</td>
+      <td style="color:var(--muted)">${b.reason}</td>
+      <td>${b.time}</td>
+    </tr>`).join('');
+}
+
+function refreshAll() {
+  renderStats();
+  renderKafkaMini();
+  renderFeed('dash-feed');
+  renderAuditTable();
+  renderAlerts();
+  renderRules();
+  renderKafkaTopics();
+  updateAlertCount();
+}
+
+// ── Page navigation ───────────────────────────────────────────
+function showPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-'+id)?.classList.add('active');
+  document.querySelector(`[onclick="showPage('${id}')"]`)?.classList.add('active');
+  refreshAll();
+}
+
+// ── Gateway tester ────────────────────────────────────────────
+function quickTest(type) {
+  const presets = {
+    sql:           {token:'tok_analyst_001', table:'GPS_EMPLOYEES', filter:"1 UNION SELECT * FROM SYS.USERS"},
+    noauth:        {token:'tok_hacker_999',  table:'GPS_EMPLOYEES', filter:''},
+    blocked_table: {token:'tok_admin_001',   table:'SYS_PASSWORDS', filter:''},
+    admin_clean:   {token:'tok_admin_001',   table:'GPS_EMPLOYEES', filter:''},
+    readonly_masked:{token:'tok_readonly_001',table:'GPS_EMPLOYEES',filter:''},
+  };
+  const p = presets[type];
+  document.getElementById('test-token').value  = p.token;
+  document.getElementById('test-table').value  = p.table;
+  document.getElementById('test-filter').value = p.filter;
+  runTest();
+}
+
+function runTest() {
+  const token  = document.getElementById('test-token').value;
+  const table  = document.getElementById('test-table').value;
+  const filter = document.getElementById('test-filter').value;
+  const result = simulateRequest(token, table, filter);
+  const out    = document.getElementById('test-output');
+
+  const statusColor = result.status === 'BLOCKED' ? 'var(--red)' : result.status === 'MASKED' ? 'var(--purple)' : 'var(--green)';
+  const icon = result.status === 'BLOCKED' ? '🛡' : result.status === 'MASKED' ? '◉' : '✓';
+
+  out.innerHTML = `
+    <div style="margin-bottom:12px;padding:10px 12px;background:var(--surface2);border-radius:4px;border-left:2px solid ${statusColor}">
+      <span style="font-size:13px;color:${statusColor}">${icon} ${result.status}</span>
+      <span style="float:right;color:var(--muted)">${result.ms}ms</span>
+    </div>
+    <div style="color:var(--muted);margin-bottom:6px">request_id: <span style="color:var(--text)">${Math.random().toString(36).slice(2,10)}</span></div>
+    <div style="color:var(--muted);margin-bottom:6px">token: <span style="color:var(--blue)">${token}</span> → <span style="color:var(--amber)">${MOCK_USERS[token]?.role||'INVALID'}</span></div>
+    <div style="color:var(--muted);margin-bottom:6px">table: <span style="color:var(--teal)">${table}</span></div>
+    ${result.status === 'BLOCKED' ? `<div style="color:var(--red);margin-top:8px">blocked: ${result.reason}</div>` : ''}
+    ${result.status !== 'BLOCKED' ? `<div style="color:var(--muted);margin-bottom:4px">rows: <span style="color:var(--text)">${result.rows}</span></div>` : ''}
+    ${result.maskedFields?.length > 0 ? `<div style="color:var(--muted);margin-bottom:4px">masked fields: <span style="color:var(--purple)">${result.maskedFields.join(', ')}</span></div>` : ''}
+    ${filter ? `<div style="color:var(--muted);margin-top:8px;font-size:10px">filter: "${filter}"</div>` : ''}`;
+
+  refreshAll();
+}
+
+// ── Clock ─────────────────────────────────────────────────────
+function updateClock() {
+  const el = document.getElementById('clock');
+  if (el) el.textContent = new Date().toTimeString().slice(0,8) + ' UTC';
+}
+
+// ── Init ──────────────────────────────────────────────────────
+seedTraffic();
+refreshAll();
+setInterval(updateClock, 1000);
+updateClock();
+</script>
+</body>
+</html>
